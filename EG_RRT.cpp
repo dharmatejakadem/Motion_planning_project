@@ -1,41 +1,18 @@
 #include <iostream>
 #include <vector>
 #include <stdlib.h>
-//#include "EG_RRT.h"
+#include "EG_RRT.h"
 #include <cmath>
 using namespace std;
 float t=2;
-vector <float> a;
-a.push_back(-0.1971);
-a.push_back(-0.185);
-a.push_back(0.088);
+std::vector <float> a;
 std::vector<float> b;
-b.push_back(-0.2054);
-b.push_back(-0.2049);
-b.push_back(-0.15);
 std::vector<float> c;
-c.push_back(-0.2145);
-c.push_back(-0.0817);
-c.push_back(-0.3888);
 std::vector<float> d;
-d.push_back(-0.2328);
-d.push_back(-0.1370);
-d.push_back(-0.3856);
 std::vector<float> e;
-e.push_back(-0.2248);
-e.push_back(-0.1107);
-e.push_back(0.5047);
 std::vector<float> f;
-f.push_back(-0.3028);
-f.push_back(-0.1435);
-f.push_back(-1.0368);
 std::vector<std::vector<float> > control_set;
-control_set.push_back(a);
-control_set.push_back(b);
-contrl_set.push_back(c);
-control_set.push_back(d);
-control_set.push_back(e);
-control_set.push_back(f);
+
 
 
 float tree::ReachSetDist(std::vector<double> pose,Node * x ,int &u)
@@ -64,12 +41,12 @@ result=sqrt(pow((pose2[0]-pose1[0]),2)+pow((pose2[1]-pose1[1]),2)+pow((pose2[2]-
 return result;
 }
 
-std::vector<double> tree::Integrate(Node *  x_v,std::vector<float> a)
+std::vector<double> tree::Integrate(Node * &x_v,std::vector<float> a)
 {
 std::vector<double> pose(3);
-for(int j=0;j<=2;i++)
+for(int j=0;j<=2;j++)
 {
- pose[j]=(x_v->linear_v[j]*t + 0.5 a[j]*t*t);
+ pose[j]=(x_v->linear_v[j]*t + 0.5*a[j]*t*t);
 }
   return pose;
 }
@@ -91,7 +68,7 @@ Node* tree::BestInput(Node * &x_v,int & u )
 std::vector<double> pose(3);// to change depending on the c space
 //float x_v={0,0}
 Node * x_curr=NULL;
-pose=Integrate(x_v,u);
+pose=Integrate(x_v,control_set[u]);
 
 if (IsValid(pose)==true)
 {
@@ -111,7 +88,7 @@ for(int i=0;i<control_set.size();i++)
     {
     if( control_set[i]!=control_set[u] and (x_v->cntrl_collision.size()!=6))//fix size of control set and how it is depictied
         {
-        pose=Integrate(x_v->position,control_set[i]);
+        pose=Integrate(x_v,control_set[i]);
         d=Dist(pose,x_rand->pose);//x_rand not defined
         if (d<d_min)
         {
@@ -175,5 +152,36 @@ if (dnmin<drmin)
 
 int main()
 {
+
+a.push_back(-0.1971);
+a.push_back(-0.185);
+a.push_back(0.088);
+
+b.push_back(-0.2054);
+b.push_back(-0.2049);
+b.push_back(-0.15);
+
+c.push_back(-0.2145);
+c.push_back(-0.0817);
+c.push_back(-0.3888);
+
+d.push_back(-0.2328);
+d.push_back(-0.1370);
+d.push_back(-0.3856);
+
+e.push_back(-0.2248);
+e.push_back(-0.1107);
+e.push_back(0.5047);
+
+f.push_back(-0.3028);
+f.push_back(-0.1435);
+f.push_back(-1.0368);
+
+control_set.push_back(a);
+control_set.push_back(b);
+control_set.push_back(c);
+control_set.push_back(d);
+control_set.push_back(e);
+control_set.push_back(f);
 return 0;
 }

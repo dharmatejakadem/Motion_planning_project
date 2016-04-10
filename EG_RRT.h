@@ -21,9 +21,8 @@ class tree
 std::vector<Node*> n;
 Node* BestInput(Node * &x_v,int &u );
 void Update_CVF(Node * x_v);
-std::vector<double> Integrate(Node *,std::vector<float>);
 void BestState(std::vector<double> pose,Node* &location,int &u_closest);
 float ReachSetDist(std::vector<double> pose,Node * x ,int &u);
 float Dist(std::vector<double> pose1,std::vector<double> pose2);
-std::vector<double> Integrate(Node,std::vector<float> );
+std::vector<double> Integrate(Node* & , std::vector<float> );
 };
