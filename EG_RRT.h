@@ -1,6 +1,10 @@
 #include <iostream>
 #include <vector>
 #include <cmath>
+float ReachSetDist(std::vector<double> pose,Node * x ,int &u);
+float Dist(std::vector<double> pose1,std::vector<double> pose2);
+std::vector<double> Node::Integrate(Node *  x_v,std::vector<float> a);
+
 
 struct Node
 {
@@ -17,7 +21,7 @@ struct tree
 {
 std::vector<Node*> n;
 Node* BestInput(Node * &x_v,int &u );
-void Node::Update_CVF(Node * x_v);
+void Update_CVF(Node * x_v);
 std::vector<double> Node::Integrate(Node *  x_v,std::vector<float> a);
 
 
