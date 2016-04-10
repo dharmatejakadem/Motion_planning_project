@@ -1,11 +1,9 @@
 #include <iostream>
 #include <vector>
-#include <stdlib.h>
 //#include "EG_RRT.h"
 #include <cmath>
-using namespace std;
 float t=2;
-vector <float> a;
+std::vector <float> a;
 a.push_back(-0.1971);
 a.push_back(-0.185);
 a.push_back(0.088);
@@ -173,7 +171,4 @@ if (dnmin<drmin)
 
 }
 
-int main()
-{
-return 0;
-}
+
