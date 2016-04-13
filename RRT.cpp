@@ -1,19 +1,14 @@
 #ifndef RRT_C
 #define RRT_C
-#include "RRT.h"
-//#include "EG_RRT.h"
-#include <cmath>
-using namespace std;
-using namespace OpenRAVE;
-float t=2;
-std::vector <float> a;
-std::vector<float> b;
-std::vector<float> c;
-std::vector<float> d;
-std::vector<float> e;
-std::vector<float> f;
-std::vector<std::vector<float> > control_set;
 
+#include<stdlib.h>
+#include "RRT.h"
+
+double rando()
+{return ((double) rand() / (RAND_MAX));}
+
+float t=0.5;
+float control_set[][3]={{-0.1971,-0.185,0.088},{-0.2054,-0.2049,-0.15},{-0.2145,-0.0817,-1000000},{-0.2328,-0.1370,-1000000},{-0.2248,-0.1107,1000000},{-0.3028,-0.1435,-1000000}};//changed z values
 std::vector<double> RRTNode::getConfig()
 	{
 		return _configuration;
@@ -31,22 +26,36 @@ RRTNode*  RRTNode::getParent()
 RRTNode::RRTNode()
 	{
 		parent = NULL;
+		pre_controlset = 0;//control set it used to reach this state
+        CVF = 0.0;
+        linear_v.clear(); //3 linear velocity
+        cntrl_collision.clear(); //control values that caused collision
 	}
 RRTNode:: ~RRTNode()
 	{
         _configuration.clear();
 		parent = NULL;
+		CVF = 0;
+        linear_v.clear(); //3 linear velocity
+        cntrl_collision.clear();
+
 	}
 RRTNode::RRTNode(std::vector<double> ele)
 	{
 		_configuration = ele;
 		parent = NULL;
+		CVF = 0;
+        linear_v.clear(); //3 linear velocity
+        cntrl_collision.clear();
 	}
 
 RRTNode::RRTNode(std::vector<double> ele,RRTNode* p)
     {
 		_configuration = ele;
 		parent = p;
+		CVF = 0;
+        linear_v.clear(); //3 linear velocity
+        cntrl_collision.clear();
     }
 
 void NodeTree::add(RRTNode &ele)
@@ -166,9 +175,19 @@ void NodeTree::display()
     vector<double> randomSample()
             {
             vector<double> ret;
-
             for (unsigned int j = 0;j<lower.size();j++)
                 ret.push_back(  ((float)rand()/RAND_MAX) * (upper[j]-lower[j]) +lower[j]);
+            return ret;
+            }
+
+    vector<double> randomSample_EG()
+            {
+            vector<double> ret;
+            float lower =-100, upper=100;
+            for (unsigned int j = 0;j<3;j++)
+            {
+                ret.push_back(  (rando() * (upper-lower) +lower));
+                cout<<"Random Config: "<<ret[j]<<endl;}
             return ret;
             }
 
@@ -326,7 +345,333 @@ void shortcutSmooth(OpenRAVE::EnvironmentBasePtr env, vector<RRTNode*> &path,flo
 
 
 
-std::vector< RRTNode* > RRTplanner(OpenRAVE::EnvironmentBasePtr env, std::vector<double> goalConfig,float step = 0.3,float goalBias = 0.1)
+
+//EGRRT
+//Best STate
+/*void Best_State(std::vector<double> random_config, NodeTree RRTTree, &x_best, &u_index)
+{
+        x_best = NULL;
+        float dr_min = 1000000000;
+        float dn_min = 1000000000;
+        float dr,dn;
+        for(unsigned int i = 0;i< RRTTree.size();i++)
+        {
+
+        }
+
+}*/
+RRTNode* xbest = NULL;
+int indexofu_closest = NULL;
+float Dist(std::vector<double> pose1,std::vector<double> pose2)
+{
+float result;
+result=sqrt(pow((pose2[0]-pose1[0]),2)+pow((pose2[1]-pose1[1]),2)+pow((pose2[2]-pose1[2]),2));
+return result;
+}
+
+std::vector<double> Integrate(RRTNode* x_v,float a[3])
+{
+std::vector<double> pose;
+for(unsigned int j=0;j<=2;j++)
+{
+ cout<<"J: "<<j<<endl;
+ //cout<<"Integrate-Future Position "<<pose[j]<<endl;
+ //out<<"pREVIOUS pOSITION: "<<x_v->getConfig()[j]<<endl;
+ //cout<<"nEW_pOSITION: "<<((x_v->getConfig()[j]) + x_v->linear_v[j])*t + 0.5*a[j]*t*t<<endl;
+ pose.push_back((x_v->_configuration[j]) + x_v->linear_v[j]*t + 0.5*a[j]*t*t);
+ cout<<"After pushing back position: "<<pose[j]<<endl;
+}
+  return pose;
+}
+
+
+
+float ReachSetDist(std::vector<double> x_rand,RRTNode *x,int &u)
+{
+float dist=1000000;
+float dist_new;
+std::vector<double> pose_new;
+for(unsigned int i =0;i<6;i++)//size of control fixed to 6 now, might change!!
+{
+float a[3];
+for(int z=0;z<3;z++)
+{
+a[z]=control_set[i][z];
+}
+pose_new=Integrate(x,a);
+dist_new=Dist(pose_new,x_rand);
+cout<<"dist new"<<dist_new<<endl;
+if (dist_new < dist)
+{
+cout<<"distance between node and pose in reachset dist fun"<<endl;
+ dist=dist_new;
+ u=i;
+}
+
+}
+cout<<"Dist: "<<dist<<endl;
+return dist;
+}
+int ccc = 0;
+void BestState(std::vector<double> x_rand,NodeTree RRTTree,RRTNode* &x_best,int &u_closest)  //here the location and u_closest
+{
+ccc+=1;
+cout<<"Entered Best State function:  "<<ccc<<endl;
+cout<<"Size of Control Collision in Best state: "<<(RRTTree.getTree()[0])->cntrl_collision.size()<<endl;
+/*for(int i =0;i<x_best->getConfig().size();i++)
+{
+    cout<<x_best->getConfig()[i]<<endl;
+}*/
+x_best= NULL;
+u_closest=NULL;
+float drmin = 100000,dnmin = 100000,dn,dr;
+int u = u_closest;
+cout<<"Size of tree in best state: "<<RRTTree.getTree().size()<<endl;
+for(int i=0; i<RRTTree.getTree().size();i++)// size is correct or wrong?
+{//cout<<i<<"I"<<endl;
+cout<<"Control Collision_SIze: "<<(RRTTree.getTree()[i])->cntrl_collision.size()<<"  CVF: "<<RRTTree.getTree()[i]->CVF<<"  Random: "<<rando()<<endl;
+cout<<(RRTTree.getTree()[i])->_configuration[0]<<(RRTTree.getTree()[i])->_configuration[1]<<(RRTTree.getTree()[i])->_configuration[2]<<"GetConfig"<<endl;
+if(((RRTTree.getTree()[i])->cntrl_collision.size()<6) and (RRTTree.getTree()[i]->CVF<rando()))//write the random func //size of control set
+{
+cout<<"Entered into if loop in best state"<<endl;
+dr=ReachSetDist(x_rand,RRTTree.getTree()[i],u);
+dn=Dist(x_rand,RRTTree.getTree()[i]->_configuration);
+if (dr < drmin)
+{
+drmin=dr;
+x_best=RRTTree.getTree()[i];
+cout<<"DR<DMIN"<<endl;
+u_closest=u;
+}
+if (dn<dnmin)
+{
+cout<<"DN<DMIN"<<endl;
+dnmin=dn;
+}
+
+}
+else
+{cout<<"Inside Else here xbest = null"<<endl;
+x_best=NULL;
+u=NULL;
+}
+
+}
+cout<<"dnmin,"<<dnmin<<"drmin"<<drmin<<endl;
+if (dnmin<drmin)
+{
+cout<<"DNMIN<DRMIN here xbest = null"<<endl;
+x_best=NULL;
+u_closest=NULL;
+
+}
+}
+
+void Update_CVF(RRTNode* x_best)
+{
+cout<<"entered update cvf function"<<endl;
+int cnt =1;
+x_best->CVF=1/(6);//fix the size
+while(x_best!=NULL)
+{ cnt=cnt+1;
+  x_best=x_best->parent;
+  x_best->CVF=1/(pow(6,cnt));
+}
+
+}
+
+bool comparer(float a[],float b[])
+{
+    bool ret_val = 0;
+    for(int k=0;k<(sizeof(a)/sizeof(float));k++)
+    {
+        if(a[k]==b[k])
+        {
+         ret_val += 1;
+        }
+    }
+    if(ret_val == 3)
+    {
+    return true;
+    }
+    else
+    {
+    return false;
+    }
+}
+
+RRTNode* BestInput(RRTNode* &x_best,vector<double> x_rand,int &u, OpenRAVE::EnvironmentBasePtr a )
+{
+cout<<"Best Input"<<endl;
+    vector<RobotBasePtr> vbodies;
+    a->GetRobots(vbodies);
+    RobotBasePtr robot;
+    robot = vbodies[0];
+std::vector<double> pose;// to change depending on the c space
+//float x_v={0,0}
+RRTNode* x_curr=NULL;
+float cs[3],ks[3];
+
+for(int z=0;z<3;z++)
+{
+cs[z]=control_set[u][z];
+}
+pose=Integrate(x_best,cs);
+//cout<<"Vector"<<pose[0]<<endl;
+robot->SetActiveDOFValues(pose);
+if (!a->CheckCollision(robot)==true)
+{
+x_curr=new RRTNode();
+x_curr->_configuration=pose;
+x_curr->parent=x_best;
+cout<<"pose before adding to tree "<<pose[0]<<pose[1]<<pose[2]<<endl;
+cout<<"xcurr in best input"<<x_curr->_configuration[0]<<endl;
+for(int j=0;j<3;j++)
+{
+x_curr->linear_v.push_back(x_curr->parent->linear_v[j] + cs[j]*t);
+}
+cout<<"returning xcurr here 1"<<endl;
+return x_curr;
+}
+else
+{
+x_best->cntrl_collision.push_back(u);
+float d_min=99999999;
+float d=10000000;
+for(int i=0;i<6;i++)
+    {
+    for(int z=0;z<3;z++)
+        {
+        cs[z]=control_set[i][z];
+        ks[z]=control_set[u][z];
+        }
+    if((comparer(cs,ks))==true and (x_best->cntrl_collision.size()!=6))//fix size of control set and how it is depictied
+        {
+        pose=Integrate(x_best,cs);
+        d=Dist(pose,x_rand);//x_rand not defined
+        if (d<d_min)
+        {   robot->SetActiveDOFValues(pose);
+            if (!a->CheckCollision(robot)==true)
+            {   x_curr=new RRTNode();
+                x_curr->parent=x_best;
+                for(int j=0;j<3;j++)
+                {
+                 x_curr->linear_v.push_back(x_curr->parent->linear_v[j] + cs[j]*t);
+                }
+                d_min=d;
+                x_curr->pre_controlset=i;
+                u=i;
+                cout<<"pose before adding to tree "<<pose[0]<<pose[1]<<pose[2]<<endl;
+                x_curr->_configuration=pose;
+                cout<<x_curr->_configuration[0]<<endl;
+
+            }
+            else
+            {cout<<"Inside UpdateCVF"<<endl;
+            x_best->cntrl_collision.push_back(i);
+              Update_CVF(x_best);
+            }
+        }
+        }
+    else if(x_best->cntrl_collision.size()==6)
+    {
+    u=NULL;
+    cout<<"returning xcurr here 2"<<endl;
+    return x_curr=NULL;
+    }
+
+}
+cout<<"returning xcurr here 3"<<endl;
+u=NULL;
+return x_curr;
+}
+}
+
+vector<RRTNode* > EGRRTbuild(vector<double> initial, vector<double> Goal,OpenRAVE::EnvironmentBasePtr a)
+{
+
+cout<<"EG"<<endl;
+RRTNode *x,*xcurr;
+vector<double> qrand;
+int i=0;
+x=new RRTNode(initial);
+cout<<"start point"<<initial[0]<<initial[1]<<initial[2]<<endl;
+x->linear_v.push_back(0);
+x->linear_v.push_back(0);
+x->linear_v.push_back(0);
+NodeTree t1;
+t1.add(x);
+cout<<"added initial configuration"<<endl;
+//cout<<(t1.getTree()[0])->cntrl_collision.size()<<endl;
+do
+{
+cout<<"entered do loop"<<endl;
+i++;
+//qrand = randomSample_EG();
+qrand.push_back(Goal[0]);
+qrand.push_back(Goal[1]);
+qrand.push_back(Goal[2]);
+/*for(int i =0;i<qrand.size();i++)
+{
+    cout<<qrand[i]<<endl;
+}*/
+cout<<"choosed random sample"<<endl;
+cout<<"Before beststate in EG"<<endl;
+BestState(qrand,t1,xbest,indexofu_closest);
+cout<<"After beststate in EG"<<endl;
+//cout<<xbest->cntrl_collision.size()<<endl;
+if(xbest!=NULL)
+{
+cout<<"Going to BestInput in EG"<<endl;
+xcurr = BestInput(xbest,qrand,indexofu_closest,a);
+if(xcurr!=NULL)
+{
+cout<<"adding node to tree in EG"<<endl;
+//cout<<typeid(xcurr).name()<<endl;
+cout<<"node is"<<xcurr->_configuration[0]<<xcurr->_configuration[1]<<xcurr->_configuration[2]<<endl;
+t1.add(xcurr); //InsertNode is a function
+}
+}
+//else{cout<<"GotError"<<endl;}
+
+}while(i<100000 && euclidean(t1.getTree()[t1.getTree().size()-1]->getConfig(), Goal) >= 0.1);
+cout<<"came out of EG loop"<<endl;
+t1.add(new RRTNode(Goal,t1.getTree()[t1.getTree().size()-1]));
+cout<<"size of tree"<<t1.getTree().size()<<endl;
+return t1.getPathToStart(t1.getTree()[t1.getTree().size()-1]);
+}
+
+/*
+std::vector< RRTNode* > EGRRTplanner(OpenRAVE::EnvironmentBasePtr env, std::vector<double> goalConfig,float step = 0.1,float goalBias = 0.1)
+{
+        vector<RobotBasePtr> vbodies;
+        env->GetRobots(vbodies);
+        RobotBasePtr robot;
+        robot = vbodies[0];
+        vector<double> start;
+
+        robot->GetActiveDOFValues(start);
+
+        robot->GetActiveDOFLimits(lower,upper);
+        lower[4] = lower[3] = 0;
+        upper[4] = upper[3] = 0;
+        upper[5] = 0;
+        lower[5] = 0;
+        lower[0] = lower[1] = lower[2] = -5;
+        upper[0] = upper[1] = upper[2] = 5;
+
+        NodeTree RRTTree(*(new RRTNode(start)));
+
+        random_config = randomSample();
+        Best_State(random_config,RRTTree);
+
+}*/
+//EGRRT
+
+
+
+
+std::vector< RRTNode* > RRTplanner(OpenRAVE::EnvironmentBasePtr env, std::vector<double> goalConfig,float step = 0.1,float goalBias = 0.1)
 {
 
 cout<<"Planning using unidirectional RRT"<<endl;
@@ -346,8 +691,8 @@ cout<<"Planning using unidirectional RRT"<<endl;
         upper[4] = upper[3] = 0.78;
         upper[5] = 3.14;
         lower[5] = -3.14;
-        lower[0] = lower[1] = lower[2] = -5;
-        upper[0] = upper[1] = upper[2] = 5;
+        lower[0] = lower[1] = lower[2] = -4.5;
+        upper[0] = upper[1] = upper[2] = 4.5;
 
         trimToRegion(start);
 
@@ -369,7 +714,7 @@ cout<<"Planning using unidirectional RRT"<<endl;
 
         //choose connect/extend
         bool connect = 1;
-        vector<double> q_s,onPath,direction;
+        vector<double> q_s,onPath,direction,random_config;
         RRTNode *nearest = new RRTNode(start),*tem;
         bool goalFlag =0;
 
@@ -610,203 +955,6 @@ std::vector< RRTNode* > RRTbiplanner(OpenRAVE::EnvironmentBasePtr env, vector<do
 
          return path;
 
-}
-//EGRRT BLOCK STARTS
-float NodeTree::ReachSetDist(std::vector<double> pose,RRTNode * x ,int &u)
-{
-float dist=1000000;
-float dist_new;
-std::vector<double> pose_new;
-for(int i =0;i<6;i++)//size of control fixed to 6 now, might change!!
-{
-pose_new=Integrate(x,control_set[i]);
-dist_new=Dist(pose_new,pose);
-if (dist_new < dist)
-{
- dist=dist_new;
- u=i;
-}
-
-}
-return dist;
-}
-
-float NodeTree::Dist(std::vector<double> pose1,std::vector<double> pose2)
-{
-float result;
-result=sqrt(pow((pose2[0]-pose1[0]),2)+pow((pose2[1]-pose1[1]),2)+pow((pose2[2]-pose1[2]),2));
-return result;
-}
-
-std::vector<double> NodeTree::Integrate(RRTNode * &x_v,std::vector<float> a)
-{
-std::vector<double> pose(3);
-for(int j=0;j<=2;j++)
-{
- pose[j]=(x_v->linear_v[j]*t + 0.5*a[j]*t*t);
-}
-  return pose;
-}
-
-void NodeTree::Update_CVF(RRTNode * x_v)
-{
-int cnt =1;
-x_v->CVF=1/(6);//fix the size
-while(x_v!=NULL)
-{ cnt=cnt+1;
-  x_v=x_v->parent;
-  x_v->CVF=1/(pow(6,cnt));
-}
-
-}
-
-RRTNode* NodeTree::BestInput(RRTNode * &x_v,int & u )
-{
-std::vector<double> pose(3);// to change depending on the c space
-//float x_v={0,0}
-RRTNode* x_curr=NULL;
-pose=Integrate(x_v,control_set[u]);
-
-if (IsValid(pose)==true)
-{
-x_curr=new RRTNode;
-x_curr->position=pose;
-x_curr->parent=x_v;
-return x_curr;
-}
-else
-{
-x_v->cntrl_collision.push_back(u);
-float d_min=99999999;
-float d=10000000;
-std::vector<float> u_best(3,NULL);
-
-for(int i=0;i<control_set.size();i++)
-    {
-    if( control_set[i]!=control_set[u] and (x_v->cntrl_collision.size()!=6))//fix size of control set and how it is depictied
-        {
-        pose=Integrate(x_v,control_set[i]);
-        d=Dist(pose,x_rand->pose);//x_rand not defined
-        if (d<d_min)
-        {
-            if (IsValid(pose)==true)
-            {   x_curr=new Node();
-                d_min=d;
-                x_curr->pre_controlset=i;
-                x_curr->position=pose;
-                x_curr->parent=x_v;
-            }
-            else
-            { x_v->cntrl_collision.push_back(i);
-              Update_CVF(x_v);
-
-            }
-
-        }
-        }
-    else if (x_v->cntrl_collision.size()==6)
-    {
-    return x_curr;
-    }
-
-}
-return x_curr;
-}
-}
-
-void NodeTree::BestState(std::vector<double> pose,RRTNode* &location,int &u_closest)  //here the location and u_closest
-{location= NULL;
-float drmin = 100000,dnmin = 100000,dn,dr;
-int u;
-for(int i =0; i<t1.size();i++)//t1 is tree object
-{
-if((t1[i]->cntrl_collision.size()<6) and (t1[i]->CVF<(rand()/RAND_MAX))//write the random func //size of control set
-{
-dr=ReachSetDist(pose,t1[i],u);
-dn=Dist(pose,t1[i]->position);
-if (dr < drmin)
-{
-drmin=dr;
-location=t1[i];
-u_closest=u;
-}
-if (dn<dnmin)
-{
-dnmin=dn;
-}
-
-}
-
-
-}
-if (dnmin<drmin)
-{ location=NULL;
- u_closest=NULL;
-
-}
-
-}
-vector<RRTNode <T>* > EGRRTbuild(T initial, T Goal,EnvironmentBasePtr a)
-{
-RRTNode<T> *x;
-T qrand;
-int i=0;
-x=new RRTNode<T> (initial);
-NodeTree<T> t1;
-t1.addnode(x);
-do
-{
-i++;
-qrand=randomSample();
-BestState(qrand,xbest,indexofu_closest);
-if(xbest!=NULL)
-{
-BestInput(xbest,qrand,indexofu_closest);
-if(indexofu_closest!=NULL)
-{
-t1.InsertNode(xbest); //InsertNode is a function
-}
-}
-
-}while(i<100000 && Euclidean(t1.getnodes()[t1.getnodes().size()-1]->getval(), Goal) >= 0.25);
-t1.addnode(new RRTNode<T> (Goal,t1.getnodes()[t1.getnodes().size()-1]));
-return t1.getpath(t1.getnodes()[t1.getnodes().size()-1]);
-}
-
-int main()
-{
-
-a.push_back(-0.1971);
-a.push_back(-0.185);
-a.push_back(0.088);
-
-b.push_back(-0.2054);
-b.push_back(-0.2049);
-b.push_back(-0.15);
-
-c.push_back(-0.2145);
-c.push_back(-0.0817);
-c.push_back(-0.3888);
-
-d.push_back(-0.2328);
-d.push_back(-0.1370);
-d.push_back(-0.3856);
-
-e.push_back(-0.2248);
-e.push_back(-0.1107);
-e.push_back(0.5047);
-
-f.push_back(-0.3028);
-f.push_back(-0.1435);
-f.push_back(-1.0368);
-
-control_set.push_back(a);
-control_set.push_back(b);
-control_set.push_back(c);
-control_set.push_back(d);
-control_set.push_back(e);
-control_set.push_back(f);
-return 0;
 }
 
 #endif
